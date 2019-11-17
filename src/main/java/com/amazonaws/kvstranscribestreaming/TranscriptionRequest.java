@@ -18,9 +18,6 @@ package com.amazonaws.kvstranscribestreaming;
  */
 
 import java.util.Optional;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.transcribestreaming.model.LanguageCode;
 
 public class TranscriptionRequest {
@@ -32,8 +29,41 @@ public class TranscriptionRequest {
     Optional<String> languageCode = Optional.empty();
     boolean transcriptionEnabled = false;
     Optional<Boolean> saveCallRecording = Optional.empty();
-    boolean streamAudioFromCustomer = true;
-    boolean streamAudioToCustomer = true;
+    String actionType = null;
+    String phoneNumber = null;
+        String callNr = null;
+
+
+    public String getActionType() {
+
+        return this.actionType;
+    }
+    public String getCallNr() {
+
+        return this.callNr;
+    }
+
+        public void setCallNr(String callNr) {
+
+        this.callNr = callNr;
+    }
+
+
+    public void setActionType(String ActionType) {
+
+        this.actionType = ActionType;
+    }
+
+    public void setPhoneNumber(String phoneNumber) {
+
+        this.phoneNumber = phoneNumber;
+    }
+
+
+    public String getPhoneNumber() {
+
+        return this.phoneNumber;
+    }
 
     public String getStreamARN() {
 
@@ -96,22 +126,6 @@ public class TranscriptionRequest {
         return  transcriptionEnabled;
     }
 
-    public void setStreamAudioFromCustomer(boolean enabled) {
-        streamAudioFromCustomer = enabled;
-    }
-
-    public boolean isStreamAudioFromCustomer() {
-        return  streamAudioFromCustomer;
-    }
-
-    public void setStreamAudioToCustomer(boolean enabled) {
-        streamAudioToCustomer = enabled;
-    }
-
-    public boolean isStreamAudioToCustomer() {
-        return  streamAudioToCustomer;
-    }
-
     public void setSaveCallRecording(boolean shouldSaveCallRecording) {
 
         saveCallRecording = Optional.of(shouldSaveCallRecording);
@@ -128,8 +142,8 @@ public class TranscriptionRequest {
 
     public String toString() {
 
-        return String.format("streamARN=%s, startFragmentNum=%s, connectContactId=%s, languageCode=%s, transcriptionEnabled=%s, saveCallRecording=%s, streamAudioFromCustomer=%s, streamAudioToCustomer=%s",
-                getStreamARN(), getStartFragmentNum(), getConnectContactId(), getLanguageCode(), isTranscriptionEnabled(), isSaveCallRecordingEnabled(), isStreamAudioFromCustomer(), isStreamAudioToCustomer());
+        return String.format("streamARN=%s, startFragmentNum=%s, connectContactId=%s, languageCode=%s, transcriptionEnabled=%s, saveCallRecording=%s",
+                getStreamARN(), getStartFragmentNum(), getConnectContactId(), getLanguageCode(), isTranscriptionEnabled(), isSaveCallRecordingEnabled());
     }
 
     public void validate() throws IllegalArgumentException {

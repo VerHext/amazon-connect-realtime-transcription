@@ -13,6 +13,9 @@ import com.amazonaws.services.s3.model.PutObjectResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.amazonaws.services.lambda.model.InvokeRequest;
+import com.amazonaws.services.lambda.model.InvokeResult;
+
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
@@ -92,7 +95,7 @@ public final class AudioUtils {
      * @param audioFilePath
      * @param awsCredentials
      */
-    public static void uploadRawAudio(Regions region, String bucketName, String keyPrefix, String audioFilePath, String contactId, boolean publicReadAcl, AWSCredentialsProvider awsCredentials) {
+    public static boolean uploadRawAudio(Regions region, String bucketName, String keyPrefix, String audioFilePath, String contactId, boolean publicReadAcl, AWSCredentialsProvider awsCredentials) {
         File wavFile = null;
         try {
 
@@ -104,7 +107,8 @@ public final class AudioUtils {
             wavFile = convertToWav(audioFilePath);
 
             // upload the raw audio file to the designated S3 location
-            String objectKey = keyPrefix + wavFile.getName();
+            System.out.println("XXX############# " + contactId);
+            String objectKey = keyPrefix + contactId;
 
             logger.info(String.format("Uploading Audio: to %s/%s from %s", bucketName, objectKey, wavFile));
             PutObjectRequest request = new PutObjectRequest(bucketName, objectKey, wavFile);
@@ -119,13 +123,17 @@ public final class AudioUtils {
 
             PutObjectResult s3result = s3Client.putObject(request);
 
-            logger.info("putObject completed successfully " + s3result.getETag());
+            logger.info("[I] putObject completed successfully " + s3result.getETag());
+            return true;
+
 
         } catch (SdkClientException e) {
             logger.error("Audio upload to S3 failed: ", e);
-            throw e;
+            return false;
         } catch (UnsupportedAudioFileException|IOException e) {
             logger.error("Failed to convert to wav: ", e);
+            return false;
+
         }
         finally {
             if (wavFile != null) {

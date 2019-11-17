@@ -9,15 +9,21 @@ import com.amazonaws.regions.Regions;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatchClientBuilder;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
 import com.amazonaws.services.dynamodbv2.document.DynamoDB;
+import com.amazonaws.services.lambda.AWSLambdaAsyncClient;
+import com.amazonaws.services.lambda.model.InvokeRequest;
+import com.amazonaws.services.lambda.model.InvokeResult;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.amazonaws.services.s3.model.Region;
 import com.amazonaws.transcribestreaming.FileByteToAudioEventSubscription;
 import com.amazonaws.transcribestreaming.KVSByteToAudioEventSubscription;
 import com.amazonaws.transcribestreaming.StreamTranscriptionBehaviorImpl;
 import com.amazonaws.transcribestreaming.TranscribeStreamingRetryClient;
+import org.json.simple.JSONObject;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.slf4j.Logger;
+import org.json.*;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -32,8 +38,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.Optional;
 import java.util.Date;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -96,18 +102,8 @@ public class KVSTranscribeStreamingLambda implements RequestHandler<Transcriptio
         logger.info("received context: " + context.toString());
 
         try {
-            // validate the request
-            request.validate();
+    
 
-            // create a SegmentWriter to be able to save off transcription results
-            AmazonDynamoDBClientBuilder builder = AmazonDynamoDBClientBuilder.standard();
-            builder.setRegion(REGION.getName());
-            fromCustomerSegmentWriter = new TranscribedSegmentWriter(request.getConnectContactId(), new DynamoDB(builder.build()),
-                    CONSOLE_LOG_TRANSCRIPT_FLAG);
-            toCustomerSegmentWriter = new TranscribedSegmentWriter(request.getConnectContactId(), new DynamoDB(builder.build()),
-                    CONSOLE_LOG_TRANSCRIPT_FLAG);
-
-            // If an inputFileName has been provided in the request, stream audio from the file to Transcribe
             if (request.getInputFileName() != null) {
                 startFileToTranscribeStreaming(request.getInputFileName(), request.getLanguageCode());
             }
@@ -115,7 +111,7 @@ public class KVSTranscribeStreamingLambda implements RequestHandler<Transcriptio
             else {
                 startKVSToTranscribeStreaming(request.getStreamARN(), request.getStartFragmentNum(), request.getConnectContactId(),
                         request.isTranscriptionEnabled(), request.getLanguageCode(), request.getSaveCallRecording(),
-                        request.isStreamAudioFromCustomer(), request.isStreamAudioToCustomer());
+                        true, false, request);
             }
 
             return "{ \"result\": \"Success\" }";
@@ -139,7 +135,7 @@ public class KVSTranscribeStreamingLambda implements RequestHandler<Transcriptio
      */
     private void startKVSToTranscribeStreaming(String streamARN, String startFragmentNum, String contactId, boolean transcribeEnabled,
                                                Optional<String> languageCode, Optional<Boolean> saveCallRecording,
-                                               boolean isStreamAudioFromCustomerEnabled, boolean isStreamAudioToCustomerEnabled) throws Exception {
+                                               boolean isStreamAudioFromCustomerEnabled, boolean isStreamAudioToCustomerEnabled, TranscriptionRequest request) throws Exception {
         String streamName = streamARN.substring(streamARN.indexOf("/") + 1, streamARN.lastIndexOf("/"));
 
         KVSStreamTrackObject kvsStreamTrackObjectFromCustomer = null;
@@ -152,50 +148,7 @@ public class KVSTranscribeStreamingLambda implements RequestHandler<Transcriptio
             kvsStreamTrackObjectToCustomer = getKVSStreamTrackObject(streamName, startFragmentNum, KVSUtils.TrackName.AUDIO_TO_CUSTOMER.getName(), contactId);
         }
 
-        if (transcribeEnabled) {
-            try (TranscribeStreamingRetryClient client = new TranscribeStreamingRetryClient(getTranscribeCredentials(),
-                    TRANSCRIBE_ENDPOINT, TRANSCRIBE_REGION, metricsUtil)) {
-
-                logger.info("Calling Transcribe service..");
-                CompletableFuture<Void> fromCustomerResult = null;
-                CompletableFuture<Void> toCustomerResult = null;
-
-                if (kvsStreamTrackObjectFromCustomer != null) {
-                    fromCustomerResult = getStartStreamingTranscriptionFuture(kvsStreamTrackObjectFromCustomer,
-                            languageCode, contactId, client, fromCustomerSegmentWriter, TABLE_CALLER_TRANSCRIPT, KVSUtils.TrackName.AUDIO_FROM_CUSTOMER.getName());
-                }
-
-                if (kvsStreamTrackObjectToCustomer != null) {
-                    toCustomerResult = getStartStreamingTranscriptionFuture(kvsStreamTrackObjectToCustomer,
-                            languageCode, contactId, client, toCustomerSegmentWriter, TABLE_CALLER_TRANSCRIPT_TO_CUSTOMER, KVSUtils.TrackName.AUDIO_TO_CUSTOMER.getName());
-                }
-
-                // Synchronous wait for stream to close, and close client connection
-                // Timeout of 890 seconds because the Lambda function can be run for at most 15 mins (~890 secs)
-                if (null != fromCustomerResult) {
-                    fromCustomerResult.get(890, TimeUnit.SECONDS);
-                }
-
-                if (null != toCustomerResult) {
-                    toCustomerResult.get(890, TimeUnit.SECONDS);
-                }
-
-            } catch (TimeoutException e) {
-                logger.debug("Timing out KVS to Transcribe Streaming after 890 sec");
-
-            } catch (Exception e) {
-                logger.error("Error during streaming: ", e);
-                throw e;
-
-            } finally {
-                if (kvsStreamTrackObjectFromCustomer != null) {
-                    closeFileAndUploadRawAudio(kvsStreamTrackObjectFromCustomer, contactId, saveCallRecording);
-                }
-                if (kvsStreamTrackObjectToCustomer != null) {
-                    closeFileAndUploadRawAudio(kvsStreamTrackObjectToCustomer, contactId, saveCallRecording);
-                }
-            }
-        } else {
+       
             try {
                 logger.info("Saving audio bytes to location");
 
@@ -214,8 +167,29 @@ public class KVSTranscribeStreamingLambda implements RequestHandler<Transcriptio
                 if (kvsStreamTrackObjectToCustomer != null) {
                     closeFileAndUploadRawAudio(kvsStreamTrackObjectToCustomer, contactId, saveCallRecording);
                 }
+
+                //call other lambda function. | in our example the SES lambda.
+
+            JSONObject json = new JSONObject();
+                json.put("streamARN", request.getStreamARN());
+                json.put("startFragmentNum", request.getStartFragmentNum());
+                json.put("connectContactId", request.getConnectContactId());
+                json.put("actionType", request.getActionType());
+                json.put("phoneNumber", request.getPhoneNumber());
+                json.put("callNr", request.getCallNr());
+
+
+                AWSLambdaAsyncClient client = new AWSLambdaAsyncClient(new DefaultAWSCredentialsProviderChain());
+                client.withRegion(Regions.fromName("eu-central-1"));
+                InvokeRequest invokeRequest = new InvokeRequest();
+                invokeRequest.setFunctionName("arn:aws:lambda:eu-central-1:152123040881:function:EutoniaAppointmentNotificationEmail");
+                invokeRequest.setPayload(json.toString());
+
+                InvokeResult invoke = client.invoke(invokeRequest);
+
+                System.out.println("Result invoking arn:aws:lambda:eu-central-1:152123040881:function:EutoniaAppointmentNotificationEmail: " + invoke);
             }
-        }
+        
     }
 
     /**
